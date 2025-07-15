@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-counter = "FqzkXZdwYjurnUKetJCAvaUw5WAqbwzU6gZEwydeEfqS"
+payment_gateway = "EJqXgoUzsNQKAYev9t2p68iUozaE9Kp9MptJckWe6NHw"
 
 [registry]
 url = "https://api.apr.dev"

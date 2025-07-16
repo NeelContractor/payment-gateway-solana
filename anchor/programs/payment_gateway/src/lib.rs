@@ -2,7 +2,7 @@
 #![allow(unexpected_cfgs)]
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Token, TokenAccount, Transfer, transfer};
+use anchor_lang::system_program;
 
 declare_id!("EJqXgoUzsNQKAYev9t2p68iUozaE9Kp9MptJckWe6NHw");
 
@@ -20,15 +20,16 @@ pub mod payment_gateway {
         Ok(())
     }
 
-    pub fn create_payment_intent(ctx: Context<CreatePaymentIntent>, payment_id: String, amount: u64, currency_mint: Pubkey, metadata: String) -> Result<()> {
+    pub fn create_payment_intent(ctx: Context<CreatePaymentIntent>, payment_id: String, amount: u64, metadata: String) -> Result<()> {
         let payment_intent = &mut ctx.accounts.payment_intent;
         payment_intent.payment_id = payment_id;
         payment_intent.merchant = ctx.accounts.merchant.key();
         payment_intent.amount = amount;
-        payment_intent.current_mint = currency_mint;
         payment_intent.status = PaymentStatus::Created;
         payment_intent.metadata = metadata;
         payment_intent.created_at = Clock::get()?.unix_timestamp;
+        payment_intent.processed_at = None;
+        payment_intent.payer = None;
         payment_intent.bump = ctx.bumps.payment_intent;
         Ok(())
     }
@@ -39,45 +40,44 @@ pub mod payment_gateway {
 
         require!(payment_intent.status == PaymentStatus::Created, PaymentError::PaymentAlreadyProcessed);
 
-        //calculate fee
+        // Calculate fee
         let fee_amount = payment_intent.amount
             .checked_mul(merchant.fee_rate)
-            .unwrap()
+            .ok_or(PaymentError::InvalidAmount)?
             .checked_div(10000)
-            .unwrap();
+            .ok_or(PaymentError::InvalidAmount)?;
 
         let merchant_amount = payment_intent.amount
-            .checked_sub(fee_amount).unwrap();
+            .checked_sub(fee_amount)
+            .ok_or(PaymentError::InvalidAmount)?;
 
-        let cpi_program = ctx.accounts.token_program.to_account_info();
-
-        // transfer fee to platform
+        // Transfer fee to platform
         if fee_amount > 0 {
-            let transfer_fee = Transfer {
-                from: ctx.accounts.payer_token_account.to_account_info(),
-                to: ctx.accounts.platform_token_account.to_account_info(),
-                authority: ctx.accounts.payer.to_account_info()
+            let transfer_fee_ix = system_program::Transfer {
+                from: ctx.accounts.payer.to_account_info(),
+                to: ctx.accounts.platform_account.to_account_info(),
             };
-            let cpi_ctx = CpiContext::new(cpi_program.clone() ,transfer_fee);
-            transfer(cpi_ctx, fee_amount)?;
+            let cpi_ctx = CpiContext::new(ctx.accounts.system_program.to_account_info(), transfer_fee_ix);
+            system_program::transfer(cpi_ctx, fee_amount)?;
         }
 
-        //trasnfer to merchant
-        let transfer_to_merchant = Transfer {
-            from: ctx.accounts.payer_token_account.to_account_info(),
-            to: ctx.accounts.merchant_token_account.to_account_info(),
-            authority: ctx.accounts.payer.to_account_info()
+        // Transfer to merchant
+        let transfer_merchant_ix = system_program::Transfer {
+            from: ctx.accounts.payer.to_account_info(),
+            to: ctx.accounts.merchant_account.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(cpi_program, transfer_to_merchant);
-        transfer(cpi_ctx, merchant_amount)?;
+        let cpi_ctx = CpiContext::new(ctx.accounts.system_program.to_account_info(), transfer_merchant_ix);
+        system_program::transfer(cpi_ctx, merchant_amount)?;
 
-        //update paymetn intent
+        // Update payment intent
         payment_intent.status = PaymentStatus::Completed;
         payment_intent.processed_at = Some(Clock::get()?.unix_timestamp);
         payment_intent.payer = Some(ctx.accounts.payer.key());
 
-        //update merchant stats
-        merchant.total_processed = merchant.total_processed.checked_add(payment_intent.amount).unwrap();
+        // Update merchant stats
+        merchant.total_processed = merchant.total_processed
+            .checked_add(payment_intent.amount)
+            .ok_or(PaymentError::InvalidAmount)?;
         
         Ok(())
     }
@@ -114,7 +114,11 @@ pub struct CreatePaymentIntent<'info> {
         bump
     )]
     pub payment_intent: Account<'info, PaymentIntent>,
-    #[account(mut)]
+    
+    #[account(
+        mut,
+        constraint = merchant.authority == authority.key() @ PaymentError::InvalidAuthority
+    )]
     pub merchant: Account<'info, Merchant>,
     pub system_program: Program<'info, System>,
 }
@@ -128,18 +132,25 @@ pub struct ProcessPayment<'info> {
     #[account(
         mut,
         seeds = [b"payment", payment_id.as_bytes()],
-        bump = payment_intent.bump
+        bump = payment_intent.bump,
+        constraint = payment_intent.status == PaymentStatus::Created @ PaymentError::PaymentAlreadyProcessed
     )]
     pub payment_intent: Account<'info, PaymentIntent>,
-    #[account(mut)]
+    
+    #[account(
+        mut,
+        constraint = merchant.key() == payment_intent.merchant @ PaymentError::InvalidMerchant
+    )]
     pub merchant: Account<'info, Merchant>,
+    
+    /// CHECK: This is the merchant's SOL receiving account
     #[account(mut)]
-    pub payer_token_account: Account<'info, TokenAccount>,
+    pub merchant_account: UncheckedAccount<'info>,
+    
+    /// CHECK: This is the platform's SOL receiving account
     #[account(mut)]
-    pub merchant_token_account: Account<'info, TokenAccount>,
-    #[account(mut)]
-    pub platform_token_account: Account<'info, TokenAccount>,
-    pub token_program: Program<'info, Token>,
+    pub platform_account: UncheckedAccount<'info>,
+    
     pub system_program: Program<'info, System>,
 }
 
@@ -151,7 +162,7 @@ pub struct Merchant {
     pub authority: Pubkey,
     pub fee_rate: u64,
     pub total_processed: u64,
-    pub bump: u8
+    pub bump: u8,
 }
 
 #[account]
@@ -161,14 +172,13 @@ pub struct PaymentIntent {
     pub payment_id: String,
     pub merchant: Pubkey,
     pub amount: u64,
-    pub current_mint: Pubkey,
     pub status: PaymentStatus,
     #[max_len(200)]
     pub metadata: String,
     pub created_at: i64,
     pub processed_at: Option<i64>,
     pub payer: Option<Pubkey>,
-    pub bump: u8
+    pub bump: u8,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq, InitSpace)]
@@ -176,7 +186,7 @@ pub enum PaymentStatus {
     Created,
     Completed,
     Failed,
-    Refunded
+    Refunded,
 }
 
 #[error_code]
@@ -187,4 +197,8 @@ pub enum PaymentError {
     InvalidAmount,
     #[msg("Insufficient funds.")]
     InsufficientFunds,
+    #[msg("Invalid authority.")]
+    InvalidAuthority,
+    #[msg("Invalid merchant.")]
+    InvalidMerchant,
 }

@@ -20,14 +20,14 @@ interface CreatePaymentIntentFnArgs {
   merchantPubkey: PublicKey;
   merchantId: string, 
   amount: number, 
-  currencyMint: PublicKey, 
+  // currencyMint: PublicKey, 
   metadata: string
 }
 
 interface ProcessPaymentFnArgs {
   merchantPubkey: PublicKey;
   merchantId: string, 
-  currencyMint: PublicKey, 
+  // currencyMint: PublicKey, 
   payerPubkey: PublicKey, 
   paymentId: string
 }
@@ -109,7 +109,7 @@ export function usePaymentGatewayProgram() {
 
   const createPaymentIntentFn = useMutation<string, Error, CreatePaymentIntentFnArgs>({
     mutationKey: ['payment-intent', 'create', { cluster }],
-    mutationFn: async ({ merchantPubkey, merchantId, amount, currencyMint, metadata }) => {
+    mutationFn: async ({ merchantPubkey, merchantId, amount, metadata }) => {
       // Generate a short payment ID (max 20 chars to stay within 32 byte limit)
       const paymentId = generatePaymentId(20);
       
@@ -148,7 +148,7 @@ export function usePaymentGatewayProgram() {
       );
 
       return await program.methods
-        .createPaymentIntent(paymentId, new BN(amount), currencyMint, metadata)
+        .createPaymentIntent(paymentId, new BN(amount), metadata)
         .accountsPartial({ 
           authority: merchantPubkey,
           paymentIntent: paymentIntentPda,
@@ -170,7 +170,7 @@ export function usePaymentGatewayProgram() {
 
   const processPaymentFn = useMutation<string, Error, ProcessPaymentFnArgs>({
     mutationKey: ['payment', 'process', { cluster }],
-    mutationFn: async ({ merchantPubkey, merchantId, currencyMint, payerPubkey, paymentId }) => {
+    mutationFn: async ({ merchantPubkey, merchantId, payerPubkey, paymentId }) => {
       // Ensure merchant ID is within limits (should match what was used in creation)
       const safeMerchantId = merchantId.length > 20 ? merchantId.substring(0, 20) : merchantId;
 
@@ -184,21 +184,21 @@ export function usePaymentGatewayProgram() {
         program.programId
       );
       
-      const payerTokenAccount = getAssociatedTokenAddressSync(
-        currencyMint,
-        payerPubkey
-      )
-      console.log("payerTokenAccount:", payerTokenAccount.toBase58());
+      // const payerTokenAccount = getAssociatedTokenAddressSync(
+      //   currencyMint,
+      //   payerPubkey
+      // )
+      // console.log("payerTokenAccount:", payerTokenAccount.toBase58());
   
-      const merchantTokenAccount = getAssociatedTokenAddressSync(
-        currencyMint,
-        merchantPubkey
-      )
+      // const merchantTokenAccount = getAssociatedTokenAddressSync(
+      //   currencyMint,
+      //   merchantPubkey
+      // )
   
-      const platformTokenAccount = getAssociatedTokenAddressSync(
-        currencyMint,
-        PLATFORM_PUBKEY
-      )
+      // const platformTokenAccount = getAssociatedTokenAddressSync(
+      //   currencyMint,
+      //   PLATFORM_PUBKEY
+      // )
 
       return await program.methods
         .processPayment(paymentId)
@@ -206,10 +206,12 @@ export function usePaymentGatewayProgram() {
           payer: payerPubkey,
           paymentIntent: paymentIntentPda,
           merchant: merchantPda,
-          payerTokenAccount: payerTokenAccount,
-          merchantTokenAccount: merchantTokenAccount,
-          platformTokenAccount: platformTokenAccount,
-          tokenProgram: TOKEN_PROGRAM_ID,
+          // payerTokenAccount: payerTokenAccount,
+          // merchantTokenAccount: merchantTokenAccount,
+          // platformTokenAccount: platformTokenAccount,
+          // tokenProgram: TOKEN_PROGRAM_ID,
+          merchantAccount: merchantPubkey,
+          platformAccount: PLATFORM_PUBKEY,
           systemProgram: SystemProgram.programId
         })
         .rpc()

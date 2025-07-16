@@ -72,20 +72,20 @@ const copyToClipboard = (text: string) => {
 
 export default function PaymentGatewayDashboard() {
     const { publicKey } = useWallet();
-    const { merchantAccounts, paymentIntentAccounts, initializeMerchantFn, createPaymentIntentFn, processPaymentFn, getMerchantByAuthority } = usePaymentGatewayProgram();
+    const { merchantAccounts, paymentIntentAccounts, initializeMerchantFn, createPaymentIntentFn, processPaymentFn, getMerchantByAuthority, program } = usePaymentGatewayProgram();
     const [activeTab, setActiveTab] = useState("merchants");
 
     const [selectedMerchant, setSelectedMerchant] = useState(null);
     const [paymentForm, setPaymentForm] = useState({
         merchantId: "",
         amount: 0,
-        currencyMint: "So11111111111111111111111111111111111111112",
+        // currencyMint: "So11111111111111111111111111111111111111112",
         metadata: ""
     });
     const [processForm, setProcessForm] = useState({
         merchantId: "",
         paymentId: "",
-        currencyMint: "So11111111111111111111111111111111111111112",
+        // currencyMint: "So11111111111111111111111111111111111111112",
         merchantPubkey: ""
     });
 
@@ -115,7 +115,7 @@ export default function PaymentGatewayDashboard() {
                 merchantPubkey: publicKey,
                 merchantId: paymentForm.merchantId,
                 amount: paymentForm.amount * LAMPORTS_PER_SOL,
-                currencyMint: new PublicKey(paymentForm.currencyMint),
+                // currencyMint: new PublicKey(paymentForm.currencyMint),
                 metadata: paymentForm.metadata
             });
 
@@ -123,7 +123,7 @@ export default function PaymentGatewayDashboard() {
             setPaymentForm({
                 merchantId: '',
                 amount: 0,
-                currencyMint: "So11111111111111111111111111111111111111112",
+                // currencyMint: "So11111111111111111111111111111111111111112",
                 metadata: ""
             });
         } catch (err) {
@@ -139,7 +139,7 @@ export default function PaymentGatewayDashboard() {
             await processPaymentFn.mutateAsync({
                 merchantPubkey: new PublicKey(processForm.merchantPubkey),
                 merchantId: processForm.merchantId,
-                currencyMint: new PublicKey(processForm.currencyMint),
+                // currencyMint: new PublicKey(processForm.currencyMint),
                 payerPubkey: publicKey,
                 paymentId: processForm.paymentId
             });
@@ -147,7 +147,7 @@ export default function PaymentGatewayDashboard() {
             setProcessForm({
                 merchantId: "",
                 paymentId: "",
-                currencyMint: "So11111111111111111111111111111111111111112",
+                // currencyMint: "So11111111111111111111111111111111111111112",
                 merchantPubkey: ""
             })
         } catch (err) {
@@ -157,7 +157,7 @@ export default function PaymentGatewayDashboard() {
 
     if (!publicKey) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="min-h-screen  flex items-center justify-center">
                 <Card className="w-96">
                     <CardHeader className="text-center" >
                         <Wallet className="h-12 w-12 mx-auto mb-4 text-gray-400" />
@@ -316,7 +316,14 @@ export default function PaymentGatewayDashboard() {
                         <Alert>
                             <AlertCircle className="h-4 w-4" />
                             <AlertDescription>
-                            Failed to load payment intents: {paymentIntentAccounts.error.message}
+                                Failed to load payment intents: {paymentIntentAccounts.error.message}
+                            </AlertDescription>
+                            <AlertDescription>
+                                {paymentIntentAccounts.data?.map((data) => (
+                                    <div key={data.publicKey.toString()}>
+                                        {JSON.stringify(data)}
+                                    </div>
+                                ))}
                             </AlertDescription>
                         </Alert>
                     ) : (
@@ -434,7 +441,7 @@ export default function PaymentGatewayDashboard() {
                                     />
                                 </div>
                                 
-                                <div>
+                                {/* <div>
                                     <Label htmlFor="currencyMint" className="py-2">Currency Mint</Label>
                                     <Input
                                         id="currencyMint"
@@ -442,7 +449,7 @@ export default function PaymentGatewayDashboard() {
                                         onChange={(e) => setPaymentForm({...paymentForm, currencyMint: e.target.value})}
                                         placeholder="Token mint address"
                                     />
-                                </div>
+                                </div> */}
                                 
                                 <div>
                                     <Label htmlFor="metadata" className="py-2">Metadata</Label>
@@ -499,7 +506,7 @@ export default function PaymentGatewayDashboard() {
                                     />
                                 </div>
                                 
-                                <div>
+                                {/* <div>
                                     <Label htmlFor="processCurrencyMint" className="py-2">Currency Mint</Label>
                                     <Input
                                     id="processCurrencyMint"
@@ -507,7 +514,7 @@ export default function PaymentGatewayDashboard() {
                                     onChange={(e) => setProcessForm({...processForm, currencyMint: e.target.value})}
                                     placeholder="Token mint address"
                                     />
-                                </div>
+                                </div> */}
                                 
                                 <div>
                                     <Label htmlFor="merchantPubkey" className="py-2">Merchant Public Key</Label>

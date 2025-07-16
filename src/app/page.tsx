@@ -1,5 +1,7 @@
-import { DashboardFeature } from '@/components/dashboard/dashboard-feature'
+import PaymentGatewayDashboard from '@/components/payment_gateway/Home'
 
 export default function Home() {
-  return <DashboardFeature />
+  return <div>
+    <PaymentGatewayDashboard />
+  </div>
 }

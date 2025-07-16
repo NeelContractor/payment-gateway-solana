@@ -10,7 +10,7 @@ import { useAnchorProvider } from '../solana/solana-provider'
 import { useTransactionToast } from '../use-transaction-toast'
 import { toast } from 'sonner'
 import { BN } from 'bn.js'
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 
 interface InitializeMerchantFnArgs {
   merchantPubkey: PublicKey;
@@ -34,6 +34,23 @@ interface ProcessPaymentFnArgs {
 
 const feeRate = 100 // 1% fee (100 basis points)
 const PLATFORM_PUBKEY = new PublicKey("GToMxgF4JcNn8dmNiHt2JrrvLaW6S1zSPoL2W8K2Wkmi");
+
+// Helper function to generate short merchant ID
+function generateMerchantId(length: number = 20): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Helper function to generate short payment ID
+function generatePaymentId(length: number = 16): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 8);
+  return `${timestamp}_${random}`.substring(0, length);
+}
 
 export function usePaymentGatewayProgram() {
   const { connection } = useConnection()
@@ -59,9 +76,12 @@ export function usePaymentGatewayProgram() {
   })
 
   const initializeMerchantFn = useMutation<string, Error, InitializeMerchantFnArgs>({
-    mutationKey: ['counter', 'initialize', { cluster }],
+    mutationKey: ['merchant', 'initialize', { cluster }],
     mutationFn: async ({ merchantPubkey }) => {
-      const merchantId = Math.random().toString();
+      // Generate a short merchant ID (max 20 chars to stay within 32 byte limit)
+      const merchantId = generateMerchantId(20);
+      
+      console.log('Generated merchant ID:', merchantId, 'Length:', merchantId.length);
 
       const [merchantPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("merchant"), Buffer.from(merchantId)],
@@ -81,20 +101,47 @@ export function usePaymentGatewayProgram() {
       transactionToast(signature)
       await merchantAccounts.refetch()
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('Failed to initialize merchant:', error);
       toast.error('Failed to initialize merchant')
     },
   })
 
   const createPaymentIntentFn = useMutation<string, Error, CreatePaymentIntentFnArgs>({
-    mutationKey: ['counter', 'initialize', { cluster }],
+    mutationKey: ['payment-intent', 'create', { cluster }],
     mutationFn: async ({ merchantPubkey, merchantId, amount, currencyMint, metadata }) => {
-      const paymentId = Math.random().toString();
+      // Generate a short payment ID (max 20 chars to stay within 32 byte limit)
+      const paymentId = generatePaymentId(20);
+      
+      // Ensure merchant ID is within limits (truncate if necessary)
+      const safeMerchantId = merchantId.length > 20 ? merchantId.substring(0, 20) : merchantId;
+      // const merchantAcc = await program.account.merchant.fetch(merchantPubkey);
+      // const safeMerchantId = merchantAcc.merchantId;
+      
+      console.log('Payment ID:', paymentId, 'Length:', paymentId.length);
+      console.log('Safe Merchant ID:', safeMerchantId, 'Length:', safeMerchantId.length);
+
+      // Verify seed lengths
+      const merchantSeedLength = Buffer.from("merchant").length + Buffer.from(safeMerchantId).length;
+      const paymentSeedLength = Buffer.from("payment").length + Buffer.from(paymentId).length;
+      
+      console.log('Merchant seed total length:', merchantSeedLength);
+      console.log('Payment seed total length:', paymentSeedLength);
+      
+      if (merchantSeedLength > 32) {
+        throw new Error(`Merchant seed too long: ${merchantSeedLength} bytes`);
+      }
+      
+      if (paymentSeedLength > 32) {
+        throw new Error(`Payment seed too long: ${paymentSeedLength} bytes`);
+      }
 
       const [merchantPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("merchant"), Buffer.from(merchantId)],
+        [Buffer.from("merchant"), Buffer.from(safeMerchantId)],
         program.programId
       );
+      console.log("merchantPda :", merchantPda);
+      
       const [paymentIntentPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("payment"), Buffer.from(paymentId)],
         program.programId
@@ -105,7 +152,7 @@ export function usePaymentGatewayProgram() {
         .accountsPartial({ 
           authority: merchantPubkey,
           paymentIntent: paymentIntentPda,
-          merchant: merchantPda,
+          merchant: merchantPda, // merchantPda
           systemProgram: SystemProgram.programId
         })
         .rpc()
@@ -115,26 +162,33 @@ export function usePaymentGatewayProgram() {
       await paymentIntentAccounts.refetch()
       await merchantAccounts.refetch()
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('Failed to create payment intent:', error);
       toast.error('Failed to Create Payment Intent');
     },
   })
+
   const processPaymentFn = useMutation<string, Error, ProcessPaymentFnArgs>({
-    mutationKey: ['PaymentIntent', 'create', { cluster }],
+    mutationKey: ['payment', 'process', { cluster }],
     mutationFn: async ({ merchantPubkey, merchantId, currencyMint, payerPubkey, paymentId }) => {
+      // Ensure merchant ID is within limits (should match what was used in creation)
+      const safeMerchantId = merchantId.length > 20 ? merchantId.substring(0, 20) : merchantId;
 
       const [merchantPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("merchant"), Buffer.from(merchantId)],
+        [Buffer.from("merchant"), Buffer.from(safeMerchantId)],
         program.programId
       );
+      
       const [paymentIntentPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("payment"), Buffer.from(paymentId)],
         program.programId
       );
+      
       const payerTokenAccount = getAssociatedTokenAddressSync(
         currencyMint,
         payerPubkey
       )
+      console.log("payerTokenAccount:", payerTokenAccount.toBase58());
   
       const merchantTokenAccount = getAssociatedTokenAddressSync(
         currencyMint,
@@ -165,10 +219,17 @@ export function usePaymentGatewayProgram() {
       await paymentIntentAccounts.refetch()
       await merchantAccounts.refetch()
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('Failed to process payment:', error);
       toast.error('Failed to Process Payment');
     },
   })
+
+  const getMerchantByAuthority = (authority: PublicKey) => {
+    return merchantAccounts.data?.find(
+      (merchant) => merchant.account.authority.toBase58() === authority.toBase58()
+    );
+  };
 
   return {
     program,
@@ -178,7 +239,8 @@ export function usePaymentGatewayProgram() {
     getProgramAccount,
     initializeMerchantFn,
     createPaymentIntentFn,
-    processPaymentFn
+    processPaymentFn,
+    getMerchantByAuthority
   }
 }
 
